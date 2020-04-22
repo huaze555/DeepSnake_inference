@@ -8,8 +8,12 @@ from lib.network import Network
 class DeepSnake:
     def __init__(self, num_layers, heads, head_conv, down_ratio, weight_path):
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        self.net = Network(num_layers, heads, head_conv, down_ratio).to(self.device)
-        self.net.load_state_dict(torch.load(weight_path))
+        # self.net = Network(num_layers, heads, head_conv, down_ratio).to(self.device)
+        # self.net.load_state_dict(torch.load(weight_path))
+
+        # torch.save(self.net, 'full.pth')
+        self.net = torch.load('full.pth').to(self.device)
+
         self.net.eval()
         self.down_ratio = down_ratio
 
