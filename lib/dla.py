@@ -154,6 +154,7 @@ class Root(nn.Module):
         self.relu = nn.ReLU(inplace=True)
         self.residual = residual
 
+    # def forward(self, *x):  "zxj"
     def forward(self, *x):
         children = x
         x = self.conv(torch.cat(x, 1))

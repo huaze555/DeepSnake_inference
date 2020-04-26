@@ -11,17 +11,32 @@ from torch.nn.modules.utils import _pair
 from torch.autograd.function import once_differentiable
 
 from lib.csrc.dcn_v2 import _ext as _backend
+import json
 
 
 class _DCNv2(Function):
+    # @staticmethod
+    # def symbolic(g, input, offset_mask, weight, bias, stride, padding, dilation, deformable_groups):
+    #     info = json.dumps({
+    #         "dilation": dilation,
+    #         "padding": padding,
+    #         "stride": stride,
+    #         "deformable_groups": deformable_groups
+    #     })
+    #     return g.op("Plugin", input, offset_mask, weight, bias, name_s="DCNv2", info_s=info)
+
     @staticmethod
-    def forward(ctx, input, offset, mask, weight, bias,
-                stride, padding, dilation, deformable_groups):
+    def forward(ctx, input, offset_mask, weight, bias, stride, padding, dilation, deformable_groups):
         ctx.stride = _pair(stride)
         ctx.padding = _pair(padding)
         ctx.dilation = _pair(dilation)
         ctx.kernel_size = _pair(weight.shape[2:4])
         ctx.deformable_groups = deformable_groups
+
+        o1, o2, mask = torch.chunk(offset_mask, 3, dim=1)
+        offset = torch.cat((o1, o2), dim=1)
+        mask = torch.sigmoid(mask)
+
         output = _backend.dcn_v2_forward(input, weight, bias,
                                          offset, mask,
                                          ctx.kernel_size[0], ctx.kernel_size[1],
@@ -47,17 +62,16 @@ class _DCNv2(Function):
                                      ctx.dilation[0], ctx.dilation[1],
                                      ctx.deformable_groups)
 
-        return grad_input, grad_offset, grad_mask, grad_weight, grad_bias,\
-            None, None, None, None,
+        return grad_input, grad_offset, grad_mask, grad_weight, grad_bias, \
+               None, None, None, None,
 
 
 dcn_v2_conv = _DCNv2.apply
 
 
 class DCNv2(nn.Module):
-
     def __init__(self, in_channels, out_channels,
-                 kernel_size, stride, padding, dilation=1, deformable_groups=1):
+                 kernel_size, stride=1, padding=1, dilation=1, deformable_groups=1):
         super(DCNv2, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -82,9 +96,9 @@ class DCNv2(nn.Module):
 
     def forward(self, input, offset, mask):
         assert 2 * self.deformable_groups * self.kernel_size[0] * self.kernel_size[1] == \
-            offset.shape[1]
+               offset.shape[1]
         assert self.deformable_groups * self.kernel_size[0] * self.kernel_size[1] == \
-            mask.shape[1]
+               mask.shape[1]
         return dcn_v2_conv(input, offset, mask,
                            self.weight,
                            self.bias,
@@ -95,7 +109,6 @@ class DCNv2(nn.Module):
 
 
 class DCN(DCNv2):
-
     def __init__(self, in_channels, out_channels,
                  kernel_size, stride, padding,
                  dilation=1, deformable_groups=1):
@@ -116,17 +129,13 @@ class DCN(DCNv2):
         self.conv_offset_mask.bias.data.zero_()
 
     def forward(self, input):
-        out = self.conv_offset_mask(input)
-        o1, o2, mask = torch.chunk(out, 3, dim=1)
-        offset = torch.cat((o1, o2), dim=1)
-        mask = torch.sigmoid(mask)
-        return dcn_v2_conv(input, offset, mask,
+        offset_mask = self.conv_offset_mask(input)
+        return dcn_v2_conv(input, offset_mask,
                            self.weight, self.bias,
                            self.stride,
                            self.padding,
                            self.dilation,
                            self.deformable_groups)
-
 
 
 class _DCNv2Pooling(Function):
@@ -178,14 +187,13 @@ class _DCNv2Pooling(Function):
                                                    ctx.trans_std)
 
         return grad_input, None, grad_offset, \
-            None, None, None, None, None, None, None, None
+               None, None, None, None, None, None, None, None
 
 
 dcn_v2_pooling = _DCNv2Pooling.apply
 
 
 class DCNv2Pooling(nn.Module):
-
     def __init__(self,
                  spatial_scale,
                  pooled_size,
@@ -221,7 +229,6 @@ class DCNv2Pooling(nn.Module):
 
 
 class DCNPooling(DCNv2Pooling):
-
     def __init__(self,
                  spatial_scale,
                  pooled_size,
@@ -260,7 +267,6 @@ class DCNPooling(DCNv2Pooling):
         offset = input.new()
 
         if not self.no_trans:
-
             # do roi_align first
             n = rois.shape[0]
             roi = dcn_v2_pooling(input, rois, offset,

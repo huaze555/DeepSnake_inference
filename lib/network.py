@@ -29,8 +29,9 @@ class Network(nn.Module):
 
     def forward(self, x, batch=None):
         output, cnn_feature = self.dla(x)
-        with torch.no_grad():
-            ct, detection = self.decode_detection(output, cnn_feature.size(2), cnn_feature.size(3))
+        self.decode_detection(output, cnn_feature.size(2), cnn_feature.size(3))
+        # with torch.no_grad():
+        #     ct, detection = self.decode_detection(output, cnn_feature.size(2), cnn_feature.size(3))
         output = self.gcn(output, cnn_feature, batch)
         return output
 
